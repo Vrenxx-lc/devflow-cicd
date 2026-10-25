@@ -1,0 +1,71 @@
+# Define o nome exibido para este workflow no GitHub Actions.
+name: CI/CD Pipeline
+
+# Executa o pipeline quando há push para a branch principal.
+on:
+  push:
+    branches:
+      - main
+
+# Declara os jobs de validação e deploy da aplicação.
+jobs:
+  # Instala as dependências e executa a suíte de testes.
+  build-and-test:
+    # Executa este job em um runner Ubuntu hospedado pelo GitHub.
+    runs-on: ubuntu-latest
+    steps:
+      # Baixa o código do repositório para o runner.
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      # Configura o Node.js 20 e habilita o cache das dependências npm.
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # Instala as dependências reproduzindo o package-lock.json.
+      - name: Instalar dependências
+        run: npm ci
+
+      # Executa os testes automatizados da aplicação.
+      - name: Executar testes
+        run: npm test
+
+  # Faz deploy no servidor quando configurado ou simula o deploy caso contrário.
+  deploy:
+    # Aguarda a conclusão bem-sucedida do job de build e testes.
+    needs: build-and-test
+    # Executa este job em um runner Ubuntu hospedado pelo GitHub.
+    runs-on: ubuntu-latest
+    # Indica se o host de deploy foi configurado nos secrets do repositório.
+    env:
+      HAS_SERVER: ${{ secrets.SSH_HOST != '' }}
+    steps:
+      # Baixa o código do repositório para o runner de deploy.
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      # Prepara a chave SSH e executa o script remoto quando há servidor configurado.
+      - name: Configurar SSH e executar deploy
+        if: env.HAS_SERVER == 'true'
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts
+          ssh "$SSH_USER@$SSH_HOST" "bash ~/deploy_script.sh"
+
+      # Exibe mensagens de confirmação quando nenhum servidor foi configurado.
+      - name: Simular deploy sem servidor
+        if: env.HAS_SERVER != 'true'
+        run: |
+          echo "Nenhum servidor configurado - deploy simulado"
+          echo "Iniciando o deploy..."
+          echo "Deploy finalizado!"
